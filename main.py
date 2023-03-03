@@ -1,14 +1,20 @@
 from machine import Pin, PWM
-import neopixel
+from pixels import Neopixel
+import time
+import random
 
-PIXELPIN = Pin(6)
-BUZZERPIN = PWM(Pin(11))
+##################################################### Defining All Variables and constants that are used #####################################################
 
+PIXELPIN = 6
+
+#Setup the neopixel object 
 WIDTH = 8
 HEIGHT = 16
 NUMPIXELS = WIDTH * HEIGHT
 
-pixels = neopixel.NeoPixel(PIXELPIN, NUMPIXELS)
+pixels = Neopixel(NUMPIXELS, 0, PIXELPIN)
+
+#Defining the colors
 
 NR_COLORS = 6
 
@@ -216,15 +222,13 @@ g_shapes = [
 
 # Define constants
 NR_COLORS = 5
-HEIGHT = 10
-WIDTH = 10
+
+Button_LEFT = Pin(7)
+Button_RIGHT = Pin(8)
+Button_UP = Pin(10)
+Button_DOWN = Pin(9)
 
 # Define variables
-global block_x
-global block_y
-global block_color
-global block_orientation
-global block_shape
 block_x = 0
 block_y = 0
 block_color = NR_COLORS - 1
@@ -232,20 +236,28 @@ block_orientation = 0
 block_shape = 0
 
 # Define grid the grid contains the pixels of the blocks that are already on the screen the falling block is not part of the grid 
-global grid
 grid = [[0] * WIDTH for i in range(HEIGHT)]
 
-# Define buttons Not used for the moment
-Button_LEFT = Pin(7)
-Button_RIGHT = Pin(8)
-Button_UP = Pin(10)
-Button_DOWN = Pin(9)
 
+
+previousMoveTime = 0
+previousFullLineTime = 0
+
+state = {"left": 0, "right": 0, "up": 0, "down": 0}
+
+level = 800  # start off with 300ms drops
+
+falling_down = False
+
+##################################################### Defining all Functions that are used #####################################################
 
 # Define function to set pixel color
 def setPixelRGB(y, x, r, g, b):
+  global pixels
+  global index
   if (y >= 0) and (y < HEIGHT):
-    pixels.setPixelColor(HEIGHT * WIDTH - 1 - y * WIDTH - x, r, g, b)
+      index = (HEIGHT * WIDTH) - 1 - (y * WIDTH) - x
+      pixels[index] = (r, g, b)
 
 # Define function to set pixel color using a color table
 def setPixel(y, x, color):
@@ -256,13 +268,9 @@ def setPixel(y, x, color):
 
 # Define function to perform a flashclean effect
 def flashclean():
+  global pixels
   # Define constant
   tail = 5
-
-  # Generate tone on buzzer pin
-  BUZZERPIN.write_digital(1)
-  time.sleep_ms(200)
-  BUZZERPIN.write_digital(0)
 
   # Loop through rows and columns of grid
   for y in range(HEIGHT + 2):
@@ -285,6 +293,7 @@ def flashclean():
 
 # Define function to clear grid
 def clearGrid():
+  global grid
   # Loop through columns and rows of grid
   for x in range(WIDTH):
     for y in range(HEIGHT):
@@ -293,22 +302,27 @@ def clearGrid():
 
 # Define function to initialize a block
 def initBlock():
+    global block_x
+    global block_y
+    global block_color
+    global block_shape
     # Set block position
     block_x = WIDTH // 2 - 2
     block_y = 0
 
   # Set block color
-    block_color = ((block_color - 1) % NR_COLORS) + 2
+    block_color = ((block_color - 1) % NR_COLORS) + 2 # The first two colors defined in g_color are skipped because those are black and white!
 
   # Set block shape
-    block_shape = random.randint(NR_SHAPES)
+    block_shape = random.randint(0,NR_SHAPES)
 
 def canMoveTo(x, y, orientation):
+  global grid
   # Loop through rows and columns of block shape
   for dx in range(4):
     for dy in range(4):
       # Check if block shape cell is occupied
-      if g_shapes[block_shape][orientation][dy][dx]:
+      if g_shapes[block_shape-1][orientation][dy][dx]:
         # Calculate block position
         xx = x + dx
         yy = y + dy
@@ -327,32 +341,48 @@ def canMoveTo(x, y, orientation):
 
 # Define function to check if block can move down
 def canMoveDown():
+  global block_x
+  global block_y
+  global block_orientation
   return canMoveTo(block_x, block_y + 1, block_orientation)
 
 # Define function to check if block can move left
 def canMoveLeft():
+  global block_x
+  global block_y
+  global block_orientation
   return canMoveTo(block_x - 1, block_y, block_orientation)
 
 # Define function to check if block can move right
 def canMoveRight():
+  global block_x
+  global block_y
+  global block_orientation
   return canMoveTo(block_x + 1, block_y, block_orientation)
 
 # Define function to check if block can rotate
 def canRotate():
+  global block_x
+  global block_y
+  global block_orientation
   return canMoveTo(block_x, block_y, (block_orientation + 1) % 4)
 
 
 # Define function to check if block can rotate after shifting
 def canRotateShift(i):
+  global block_x
+  global block_y
+  global block_orientation
   return canMoveTo(block_x + i, block_y, (block_orientation + 1) % 4)
 
 # Define function to drop block on grid
 def dropOnGrid():
+  global grid
   # Loop through rows and columns of block shape
   for dx in range(4):
     for dy in range(4):
       # Check if block shape cell is occupied
-      if g_shapes[block_shape][block_orientation][dy][dx]:
+      if g_shapes[block_shape-1][block_orientation][dy][dx]:
         # Calculate block position
         xx = block_x + dx
         yy = block_y + dy
@@ -389,6 +419,7 @@ def isHighlightedLine(y):
 
 # Define function to delete line from grid
 def deleteLineFromGrid(d):
+  global grid
   # Loop through rows of grid
   for y in range(d, 1, -1):
     # Loop through columns of grid
@@ -411,7 +442,8 @@ def drawBlockInColor(color):
   for dx in range(4):
     for dy in range(4):
       # Check if block shape cell is occupied
-      if g_shapes[block_shape][block_orientation][dy][dx]:
+    
+      if g_shapes[block_shape-1][block_orientation][dy][dx]:
         # Calculate block position
         xx = block_x + dx
         yy = block_y + dy
@@ -421,6 +453,7 @@ def drawBlockInColor(color):
 
 # Define function to draw block
 def drawBlock():
+  global block_color
   # Draw block in block color
   drawBlockInColor(block_color)
 
@@ -436,6 +469,7 @@ def highlightBlock():
 
 # Define function to highlight line
 def highlightLine(y):
+  global grid
   # Loop through columns of grid
   for x in range(WIDTH):
     # Set grid cell to bright white
@@ -443,82 +477,65 @@ def highlightLine(y):
 
 
 def moveDown():
+  global block_y
   block_y += 1
 
 def moveLeft(i=1):
+  global block_x
   block_x -= i
 
 def moveRight(i=1):
+  global block_x
   block_x += i
 
 def rotate():
+  global block_orientation
   block_orientation = (block_orientation + 1) % 4
 
 def setup():
-  uart.init(9600, bits=8, parity=None, stop=1, tx=None, rx=None)
-  pixels.init()
   pixels.clear()
-  random.seed(analog.read(1) + analog.read(0))
   initBlock()
 
   Button_LEFT.init(mode=Pin.IN, pull=Pin.PULL_UP) # button left
   Button_RIGHT.init(mode=Pin.IN, pull=Pin.PULL_UP) # button right
   Button_UP.init(mode=Pin.IN, pull=Pin.PULL_UP) # button up
   Button_DOWN.init(mode=Pin.IN, pull=Pin.PULL_UP) # button down
-  BUZZERPIN.init(mode=Pin.OUT) # buzzer
-  # just some random beep to show we are awake! 
-  BUZZERPIN.write_digital(1)
-  time.sleep_ms(200)
-  BUZZERPIN.write_digital(0)
-  time.sleep_ms(300)
-
-
-global previousMoveTime
-global previousFullLineTime
-global previousLeft
-global previousRight
-global previousUp
-global previousDown
-global level
-global falling_down
-
-
-previousMoveTime = 0
-previousFullLineTime = 0
-
-previousLeft = 0
-previousRight = 0
-previousUp = 0
-previousDown = 0
-level = 300  # start off with 300ms drops
-
-falling_down = False
 
 # this is some lazy way to debounce.    Since there is a lot of stuff in the loop, it kind of works. 
-def buttonPressed(pin, state):
+def buttonPressed(pin, btn):
+  global state
   treshold = 4
-  if pin.read_digital():  # button is up
-      state = 0
+  if pin.value() == 1:  # button is up
+      state[btn] = 0
       return False
   else: # button down
-      state += 1
-      return state == treshold  # we only return the Pressed result once
+      state[btn] += 1
+      return state[btn] == treshold  # we only return the Pressed result once
 
 
 def buttonLeftPressed():
-  return buttonPressed(Button_LEFT, previousLeft)
+  return buttonPressed(Button_LEFT, "left")
 
 def buttonRightPressed():
-  return buttonPressed(Button_RIGHT, previousRight)
+  return buttonPressed(Button_RIGHT, "right")
 
 def buttonUpPressed():
-  return buttonPressed(Button_UP, previousUp)
+  return buttonPressed(Button_UP, "up")
 
 def buttonDownPressed():
-  return buttonPressed(Button_DOWN, previousDown)
+  return buttonPressed(Button_DOWN, "down")
 
 
 def loop():
+  global previousMoveTime
+  global previousMoveTime
+  global previousFullLineTime
+  global previousLeft
+  global previousRight
+  global previousUp
+  global previousDown
+  global level
+  global falling_down
   eraseBlock()
   if buttonLeftPressed() and canMoveLeft():
     moveLeft()
@@ -528,6 +545,7 @@ def loop():
     # first try to just rotate
     if canRotate():
       rotate()
+      
     else:
       #  
       for i in range(1, -3, -1):
@@ -537,7 +555,7 @@ def loop():
           break
   if buttonDownPressed():
     falling_down = True
-
+  
   if (time.ticks_ms() - previousMoveTime >= level) or falling_down:
     if canMoveDown(): 
       moveDown()
@@ -547,12 +565,11 @@ def loop():
       drawGrid()
       if block_y<4:
         flashclean()   
-        uart.write("game over\n")
         # game over  
         clearGrid()
         drawGrid()
         # reset the interval back to 300ms 
-        level = 300
+        level = 800
       initBlock()  
     previousMoveTime = time.ticks_ms()
 
@@ -567,11 +584,20 @@ def loop():
       highlightLine(y)
       drawGrid()
       previousFullLineTime = time.ticks_ms()
-      BUZZERPIN.write_digital(1)
-      time.sleep_ms(5)
-      BUZZERPIN.write_digital(0)
       # make blocks drop a little (2ms) faster 
       level = level - 2
 
   drawBlock() 
   pixels.show()
+
+
+
+##################################################### Running The Code #####################################################
+setup()
+while True:
+    loop()
+
+
+
+
+
